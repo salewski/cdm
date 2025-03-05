@@ -11,11 +11,11 @@ directory (with `mkdir(1)`) and then immediately changing into it (with `cd`).
 
 Yes, this is done frequently enough that it merits its own wrapper script.
 
-The reason two-step sequence of commands (`mkdir` followed by `cd`) requires
-"machinery" is that on Unix-like operating systems, a sub-process cannot
-affect the "current working directory" of the parent process. Hence, if we
-want a shell command to change the current directory of "this" shell process,
-our options for doing so include:
+The reason the two-step sequence of commands (`mkdir` followed by `cd`)
+requires "machinery" is that on Unix-like operating systems, a sub-process
+cannot affect the "current working directory" of the parent process. Hence, if
+we want a shell command to change the current directory of "this" shell
+process, our options for doing so include:
 
    1. define a shell alias
    2. define a shell function
