@@ -1,0 +1,20 @@
+# -*- text -*-
+
+This is the 'README' file from the subdirectory:
+
+    autotools/
+
+of the 'cdm' project.
+
+This directory exists as the home for any custom m4 macros, if any, need by
+the project build, which is based on the GNU Autotools. Even if we do not have
+any such macros currently, we want this subdirectory to exist both as a
+reminder of where they would go, and also because this location is referenced
+from the 'configure.ac' file in the top-level directory of the project. Search
+that file for 'AC_CONFIG_MACRO_DIR'.
+
+Note that the Git version control system does not track empty directories;
+directories exist in the repository only as a side effect of Git tracking
+files within those directories. Therefore, this 'README' file also serves the
+purpose of being able to have an otherwise empty 'autotools/' subdir as part
+of the Git repo.
