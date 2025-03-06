@@ -3,6 +3,17 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 # cdm.bash: change to directory, creating it first if it does not yet exist.
+# If multiple directories are named, all will be created (if necessary), and
+# we will change to the last one named on the command line.
+#
+# HINT: The "change to last directory named" behavior is intended to be
+#       analogous to the POSIX cp(1) command, when invoked with more than two
+#       file names:
+#
+#           $ cp FILE... TARGET
+#
+#       In such a situation, the TARGET argument is expected to be a
+#       directory, and the other named files are copied into it.
 #
 # Since a subprocess cannot change the current working directory of a parent
 # process, this script must be "sourced" in your current shell process to have
@@ -10,7 +21,7 @@
 # following in your ~/.bashrc:
 #
 #     function cdm () {
-#         local impl_fpath="${HOME}/bin/cdm.bash"
+#         local impl_fpath='path/to/cdm.bash'
 #         if test -e "${impl_fpath}"; then :; else
 #             printf "cdm: (error): no such file: %s; bailing out\n" "${impl_fpath}" 1>&2
 #             return 1
@@ -23,10 +34,25 @@
 #
 # The 'cdm.bash' script effectively does this:
 #
-#     $ mkdir -p path/to/somedir
-#     $ cd path/to/somedir
+#     $ mkdir -p path/to/firstdir path/to/seconddir path/to/nthdir
+#     $ cd path/to/nthdir
 #
 # Yes, this is done frequently enough that it merits its own wrapper script.
+#
+# Note that common usage is expected to be simple, as in:
+#
+#     $ cdm path/to/somedir
+#
+# but the behavior of accepting multiple directory arguments on the command
+# line is intended to allow (also pretty common) uses such as:
+#
+#     $ cdm path/to/some-project/{pristine,munge}
+#
+# which is a common pattern for the author, and after shell expansion results
+# in the following two-argument invocation:
+#
+#     $ cdm path/to/some-project/pristine path/to/some-project/munge
+#
 #
 # CAVEAT: The '-h' (--help) and '-V' (--version) options are supported, but
 #         not arbitrary command line opts. In particular, there is neither a
@@ -56,13 +82,13 @@
 #declare __cdm_dot_bash_PROG='cdm.bash'
 declare __cdm_dot_bash_PROG='cdm'
 
-declare __cdm_dot_bash_COPYRIGHT_DATES='2020'
+declare __cdm_dot_bash_COPYRIGHT_DATES='2020, 2025'
 
 # # FIXME: one day this will be filtered in at build time
 declare __cdm_dot_bash_MAINTAINER='Alan D. Salewski <ads@salewski.email>'
 
 # # FIXME: one day this will be filtered in at build time
-declare __cdm_dot_bash_VERSION='0.0.1'
+declare __cdm_dot_bash_VERSION='0.1.0'
 
 # FIXME: one day this will be filtered in at build time
 # This variable is replaced at build time
@@ -76,10 +102,11 @@ function __cdm_dot_bash_f_print_help () {
     cat <<EOF
 usage: ${__cdm_dot_bash_PROG} { -h | --help }
   or:  ${__cdm_dot_bash_PROG} { -V | --version }
-  or:  ${__cdm_dot_bash_PROG} DIRECTORY
+  or:  ${__cdm_dot_bash_PROG} DIRECTORY...
 
-Change (cd) to DIRECTORY, creating it first if it does not yet exist.
-Any needed parent directories will be created, as well.
+Create DIRECTORY... arguments, if they do not yet exist
+(any needed parent directories will be created, as well);
+then change (cd) to the DIRECTORY argument named last on the command line.
 
   -h, --help     Print this help message on stdout
   -V, --version  Print the version of the program on stdout
@@ -106,7 +133,8 @@ function __cdm_dot_bash_f_cleanup () {
     unset -f __cdm_dot_bash_f_print_version
     unset -f __cdm_dot_bash_f_print_help
 
-    unset -v __cdm_dot_bash_target_directory
+    unset -v __cdm_dot_bash__cd_target_directory
+    unset -v __cdm_dot_bash__one_target_directory
 
     unset -v __cdm_dot_bash_gl_const_release
     unset -v __cdm_dot_bash_VERSION
@@ -123,7 +151,7 @@ function __cdm_dot_bash_f_cleanup () {
 # common case '--help' and '--version' usage; hence this compromise impl:
 
 if test $# -lt 1; then
-    printf "${__cdm_dot_bash_PROG} (error): DIRECTORY not specified; bailing out\n" 1>&2
+    printf "${__cdm_dot_bash_PROG} (error): no DIRECTORY arguments specified; bailing out\n" 1>&2
     __cdm_dot_bash_f_print_help 1>&2
     __cdm_dot_bash_f_cleanup
     return 1
@@ -148,53 +176,57 @@ case $1 in
         ;;
 esac
 
-if test $# -gt 1; then
-    printf "${__cdm_dot_bash_PROG} (error): Only one DIRECTORY param may be specified; bailing out\n" 1>&2
-    __cdm_dot_bash_f_print_help 1>&2
-    __cdm_dot_bash_f_cleanup
-    return 1
-fi
-
-__cdm_dot_bash_target_directory=$1
-if test -z "${__cdm_dot_bash_target_directory}"; then
-    printf "${__cdm_dot_bash_PROG} (error): Value provided for DIRECTORY may not be the empty string; bailing out\n" 1>&2
-    __cdm_dot_bash_f_print_help 1>&2
-    __cdm_dot_bash_f_cleanup
-    return 1
-fi
-# XXX: The above just catches the simplest bogon case. In general, we'll
-#      attempt to create whatever directory (or directories) the user has
-#      requested. We are relying on the underlying mkdir(1) tool to reject all
-#      invalid values.
-
-if test -e "${__cdm_dot_bash_target_directory}"; then :; else
-    declare -a __cdm_dot_bash_t_mkdir_opts=()
-    __cdm_dot_bash_t_mkdir_opts+=('-p')  # --parents
-    # if ${__cdm_dot_bash_BE_VERBOSE}; then
-    #     __cdm_dot_bash_t_mkdir_opts+=('-v')  # --verbose
-    # fi
-    mkdir "${__cdm_dot_bash_t_mkdir_opts[@]}" "${__cdm_dot_bash_target_directory}"
-    if test $? -ne 0; then
-        printf "${__cdm_dot_bash_PROG} (error): Was error while creating \"%s\" (or one of its parent dirs); bailing out\n" \
-               "${__cdm_dot_bash_target_directory}" 1>&2
+unset __cdm_dot_bash__cd_target_directory
+while test $# -gt 0; do
+    __cdm_dot_bash__one_target_directory=$1
+    if test -z "${__cdm_dot_bash__one_target_directory}"; then
+        printf "${__cdm_dot_bash_PROG} (error): Value provided for DIRECTORY may not be the empty string; bailing out\n" 1>&2
+        __cdm_dot_bash_f_print_help 1>&2
         __cdm_dot_bash_f_cleanup
         return 1
     fi
-fi
-
-if test -e "${__cdm_dot_bash_target_directory}"; then
-    if test -d "${__cdm_dot_bash_target_directory}"; then :; else
-        printf "${__cdm_dot_bash_PROG} (error): \"%s\" exists, but is not a directory; bailing out\n" \
-               "${__cdm_dot_bash_target_directory}" 1>&2
-        __cdm_dot_bash_f_cleanup
-        return 1
+    # XXX: The above just catches the simplest bogon case. In general, we'll
+    #      attempt to create whatever directory (or directories) the user has
+    #      requested. We are relying on the underlying mkdir(1) tool to reject
+    #      all invalid values.
+    if test -e "${__cdm_dot_bash__one_target_directory}"; then :; else
+        declare -a __cdm_dot_bash_t_mkdir_opts=()
+        __cdm_dot_bash_t_mkdir_opts+=('-p')  # --parents
+        # if ${__cdm_dot_bash_BE_VERBOSE}; then
+        #     __cdm_dot_bash_t_mkdir_opts+=('-v')  # --verbose
+        # fi
+        mkdir "${__cdm_dot_bash_t_mkdir_opts[@]}" "${__cdm_dot_bash__one_target_directory}"
+        if test $? -ne 0; then
+            printf "${__cdm_dot_bash_PROG} (error): Was error while creating \"%s\" (or one of its parent dirs); bailing out\n" \
+                   "${__cdm_dot_bash_one_target_directory}" 1>&2
+            __cdm_dot_bash_f_cleanup
+            return 1
+        fi
     fi
-fi
+
+    if test -e "${__cdm_dot_bash__one_target_directory}"; then
+        if test -d "${__cdm_dot_bash__one_target_directory}"; then :; else
+            printf "${__cdm_dot_bash_PROG} (error): \"%s\" exists, but is not a directory; bailing out\n" \
+                   "${__cdm_dot_bash__one_target_directory}" 1>&2
+            __cdm_dot_bash_f_cleanup
+            return 1
+        fi
+    fi
+
+    # The directory into which we will ultimately want to cd will be the last
+    # command line argument named. It's a little clumsy that we set this on
+    # each loop, but the effect is that it gets set to the value that we want
+    # on the final loop.
+    #
+    __cdm_dot_bash__cd_target_directory=${__cdm_dot_bash__one_target_directory}
+
+    shift
+done
 
 # Avoid unsetting $CDPATH. If that was already set, then the user will
 # reasonably expect that 'cdm' not interfere with it.
 #
-cd "${__cdm_dot_bash_target_directory}"
+cd "${__cdm_dot_bash__cd_target_directory}"
 t_rtn=$?
 __cdm_dot_bash_f_cleanup
 return ${t_rtn}
