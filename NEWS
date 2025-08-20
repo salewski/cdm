@@ -38,9 +38,7 @@ will be noted here, as well.
     project. This allows users to type the expect sequence:
 
     :    $ configure --prefix=/path/to/location
-    :
     :    $ make
-    :
     :    $ make install
 
     The "autoconfiscation" also introduced a new command line utility:
