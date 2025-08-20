@@ -1,8 +1,27 @@
-#!/bin/bash -
-# SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
-# SPDX-License-Identifier: GPL-2.0-or-later
+#! @BASH_SH@ -
+# @configure_input@
 
-# cdm.bash: change to directory, creating it first if it does not yet exist.
+# SPDX-FileCopyrightText: <text>
+#     © 2020, 2025 Alan D. Salewski <ads@salewski.email>
+# </text>
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+#     This file is part of cdm.
+#
+#     cdm is free software: you can redistribute it and/or modify it under
+#     the terms of the GNU General Public License as published by the Free
+#     Software Foundation, either version 2 of the License, or (at your
+#     option) any later version.
+#
+#     cdm is distributed in the hope that it will be useful, but WITHOUT ANY
+#     WARRANTY; without even the implied warranty of MERCHANTABILITY or
+#     FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+#     more details.
+#
+#     You should have received a copy of the GNU General Public License along
+#     with this program. If not, see <https://www.gnu.org/licenses/>.
+
+# cdm.bash.in: change to directory, creating it first if it does not yet exist.
 # If multiple directories are named, all will be created (if necessary), and
 # we will change to the last one named on the command line.
 #
@@ -30,6 +49,9 @@
 #         source "${impl_fpath}" "$@"
 #         return $?
 #     }
+#
+# The program generate-cdm(1) will produce such a function on stdout, and is
+# the recommended way to obtain the function definition.
 #
 #
 # The 'cdm.bash' script effectively does this:
@@ -66,7 +88,7 @@
 # TODO:
 #
 #     * Maybe just do everything inside the 'cdm' shell function? That would
-#       avoid souring this separate file.
+#       avoid souring this separate file at runtime.
 #
 #     * Maybe source 'cdm.bash' once during shell startup (for interactive
 #       shells only). The function definition could be provided at that time,
@@ -79,30 +101,39 @@
 # invoked; producing any other name on the output is just needlessly leaking
 # implementation details.
 #
-#declare __cdm_dot_bash_PROG='cdm.bash'
-declare __cdm_dot_bash_PROG='cdm'
+#declare __cdm_dot_bash__PROG='cdm.bash'
+declare __cdm_dot_bash__PROG='cdm'
 
-declare __cdm_dot_bash_COPYRIGHT_DATES='2020, 2025'
+declare __cdm_dot_bash__COPYRIGHT_DATES='2020, 2025'
 
-# # FIXME: one day this will be filtered in at build time
-declare __cdm_dot_bash_MAINTAINER='Alan D. Salewski <ads@salewski.email>'
+# declare __cdm_dot_bash__MAINTAINER='@DFLT_MAINTAINER_FULL@'
+declare __cdm_dot_bash__MAINTAINER='@PACKAGE_BUGREPORT@'  # value filtered-in at build time
 
-# # FIXME: one day this will be filtered in at build time
-declare __cdm_dot_bash_VERSION='0.1.0'
+declare __cdm_dot_bash__VERSION='@VERSION@'  # value filtered-in at build time
+
 
 # FIXME: one day this will be filtered in at build time
 # This variable is replaced at build time
 # declare -r gl_const_build_date='@BUILD_DATE@'
 # declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
-declare __cdm_dot_bash_gl_const_release="${__cdm_dot_bash_VERSION}"
 
+declare __cdm_dot_bash__BUILD_DATE='@BUILD_DATE@'  # value filtered-in at build time
+declare __cdm_dot_bash__RELEASE="${__cdm_dot_bash__VERSION}  (built: ${__cdm_dot_bash__BUILD_DATE})"
+#declare __cdm_dot_bash__RELEASE="${__cdm_dot_bash__VERSION}"
+
+# By default we'll use the external programs found at configure-time (values
+# are filtered-in here at build time). But we allow the user to override any
+# particular tool by setting an environment variable named after the tool
+# (with hyphen chars changed to underscores).
+#
+__cdm_dot_bash__cmd_mkdir="${MKDIR:-@MKDIR_PROG@}"
 
 function __cdm_dot_bash_f_print_help () {
 
     cat <<EOF
-usage: ${__cdm_dot_bash_PROG} { -h | --help }
-  or:  ${__cdm_dot_bash_PROG} { -V | --version }
-  or:  ${__cdm_dot_bash_PROG} DIRECTORY...
+usage: ${__cdm_dot_bash__PROG} { -h | --help }
+  or:  ${__cdm_dot_bash__PROG} { -V | --version }
+  or:  ${__cdm_dot_bash__PROG} DIRECTORY...
 
 Create DIRECTORY... arguments, if they do not yet exist
 (any needed parent directories will be created, as well);
@@ -111,16 +142,16 @@ then change (cd) to the DIRECTORY argument named last on the command line.
   -h, --help     Print this help message on stdout
   -V, --version  Print the version of the program on stdout
 
-Report bugs to ${__cdm_dot_bash_MAINTAINER}.
+Report bugs to ${__cdm_dot_bash__MAINTAINER}.
 EOF
 }
 
 __cdm_dot_bash_f_print_version () {
     cat <<EOF
-${__cdm_dot_bash_PROG} ${__cdm_dot_bash_gl_const_release}
+${__cdm_dot_bash__PROG} ${__cdm_dot_bash__RELEASE}
 
-Copyright © ${__cdm_dot_bash_COPYRIGHT_DATES} Alan D. Salewski <ads@salewski.email>
-License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
+Copyright © ${__cdm_dot_bash__COPYRIGHT_DATES} Alan D. Salewski <ads@salewski.email>
+License GPLv2+: GNU GPL version 2 or later <https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt>.
 This is free software: you are free to change and redistribute it.
 There is NO WARRANTY, to the extent permitted by law.
 
@@ -136,11 +167,16 @@ function __cdm_dot_bash_f_cleanup () {
     unset -v __cdm_dot_bash__cd_target_directory
     unset -v __cdm_dot_bash__one_target_directory
 
-    unset -v __cdm_dot_bash_gl_const_release
-    unset -v __cdm_dot_bash_VERSION
-    unset -v __cdm_dot_bash_MAINTAINER
-    unset -v __cdm_dot_bash_COPYRIGHT_DATES
-    unset -v __cdm_dot_bash_PROG
+    unset -v __cdm_dot_bash_t_mkdir_opts
+
+    unset -v __cdm_dot_bash__cmd_mkdir
+
+    unset -v __cdm_dot_bash__RELEASE
+    unset -v __cdm_dot_bash__BUILD_DATE
+    unset -v __cdm_dot_bash__VERSION
+    unset -v __cdm_dot_bash__MAINTAINER
+    unset -v __cdm_dot_bash__COPYRIGHT_DATES
+    unset -v __cdm_dot_bash__PROG
 
     unset -f __cdm_dot_bash_f_cleanup  # self destruction
 }
@@ -151,7 +187,7 @@ function __cdm_dot_bash_f_cleanup () {
 # common case '--help' and '--version' usage; hence this compromise impl:
 
 if test $# -lt 1; then
-    printf "${__cdm_dot_bash_PROG} (error): no DIRECTORY arguments specified; bailing out\n" 1>&2
+    printf "${__cdm_dot_bash__PROG} (error): no DIRECTORY arguments specified; bailing out\n" 1>&2
     __cdm_dot_bash_f_print_help 1>&2
     __cdm_dot_bash_f_cleanup
     return 1
@@ -180,7 +216,7 @@ unset __cdm_dot_bash__cd_target_directory
 while test $# -gt 0; do
     __cdm_dot_bash__one_target_directory=$1
     if test -z "${__cdm_dot_bash__one_target_directory}"; then
-        printf "${__cdm_dot_bash_PROG} (error): Value provided for DIRECTORY may not be the empty string; bailing out\n" 1>&2
+        printf "${__cdm_dot_bash__PROG} (error): Value provided for DIRECTORY may not be the empty string; bailing out\n" 1>&2
         __cdm_dot_bash_f_print_help 1>&2
         __cdm_dot_bash_f_cleanup
         return 1
@@ -195,9 +231,9 @@ while test $# -gt 0; do
         # if ${__cdm_dot_bash_BE_VERBOSE}; then
         #     __cdm_dot_bash_t_mkdir_opts+=('-v')  # --verbose
         # fi
-        mkdir "${__cdm_dot_bash_t_mkdir_opts[@]}" "${__cdm_dot_bash__one_target_directory}"
+        "${__cdm_dot_bash__cmd_mkdir}" "${__cdm_dot_bash_t_mkdir_opts[@]}" "${__cdm_dot_bash__one_target_directory}"
         if test $? -ne 0; then
-            printf "${__cdm_dot_bash_PROG} (error): Was error while creating \"%s\" (or one of its parent dirs); bailing out\n" \
+            printf "${__cdm_dot_bash__PROG} (error): Was error while creating \"%s\" (or one of its parent dirs); bailing out\n" \
                    "${__cdm_dot_bash_one_target_directory}" 1>&2
             __cdm_dot_bash_f_cleanup
             return 1
@@ -206,7 +242,7 @@ while test $# -gt 0; do
 
     if test -e "${__cdm_dot_bash__one_target_directory}"; then
         if test -d "${__cdm_dot_bash__one_target_directory}"; then :; else
-            printf "${__cdm_dot_bash_PROG} (error): \"%s\" exists, but is not a directory; bailing out\n" \
+            printf "${__cdm_dot_bash__PROG} (error): \"%s\" exists, but is not a directory; bailing out\n" \
                    "${__cdm_dot_bash__one_target_directory}" 1>&2
             __cdm_dot_bash_f_cleanup
             return 1

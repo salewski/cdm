@@ -1,0 +1,418 @@
+dnl Process this file with autoconf to produce a configure script. -*-Autoconf-*-
+
+dnl SPDX-FileCopyrightText: <text>
+dnl     © 2016, 2017, 2020, 2021, 2022, 2025 Alan D. Salewski <ads@salewski.email>
+dnl </text>
+dnl SPDX-License-Identifier: GPL-2.0-or-later
+
+dnl +-------------------------+
+dnl |  Autotools Boilerplate  |
+dnl +-------------------------+
+
+dnl Ensure that a recent-enough version of Autoconf is being used
+AC_PREREQ([2.69])
+
+dnl Defines the following m4 macros, output variables, and preprocessor
+dnl symbols. Only the m4 macros have the 'AC_' prefix:
+dnl
+dnl     [AC_]PACKAGE_NAME
+dnl     [AC_]PACKAGE_TARNAME
+dnl     [AC_]PACKAGE_VERSION
+dnl     [AC_]PACKAGE_STRING     ("<PACKAGE> <VERSION>")
+dnl     [AC_]PACKAGE_BUGREPORT
+dnl     [AC_]PACKAGE_URL
+dnl
+AC_INIT([[cdm]],
+        [[0.1.1-snapshot]],
+        [[Alan D. Salewski <ads@salewski.email>]],
+        [[cdm]],
+        [[https://github.com/salewski/cdm]])
+
+AC_CONFIG_AUX_DIR([build-aux])
+
+dnl Indicate dir where our custom m4 macros may be found (future
+dnl proofing; as may not be used yet...)
+AC_CONFIG_MACRO_DIR([autotools])
+
+dnl Turn on all Automake warnings and report them as errors
+dnl
+dnl Enable subdir-objects. This is just future-proofing, as it will be the
+dnl default behavior in future versions of Automake.
+dnl
+dnl Use the ustar format defined by POSIX 1003.1-1988 to allow filepaths
+dnl longer than 99 chars (up to 256 chars). We use this to help avoid needing
+dnl to worry about deep directories. Writing in 2025-03, the ustar format will
+dnl be the default in the next Automake release (currently scheduled to be
+dnl version 1.17.90, but that might change by the time the release is actually
+dnl made). See commit 2d2ff6070ca13428032c14f1d1cfd57b6b22e42d:
+dnl
+dnl     https://git.savannah.gnu.org/cgit/automake.git/commit/?id=2d2ff6070ca13428032c14f1d1cfd57b6b22e42d
+dnl
+dnl in the 'automake' Git repository:
+dnl
+dnl     https://savannah.gnu.org/projects/automake
+dnl
+dnl and also bug #74847 of that project:
+dnl
+dnl     #74847: "change default tar format from v7 to ustar (was: Re: reproducible tar archives)"
+dnl     https://debbugs.gnu.org/cgi/bugreport.cgi?bug=74847
+dnl
+AM_INIT_AUTOMAKE([-Wall -Werror foreign subdir-objects tar-ustar])
+
+
+dnl AC_SUBST([DFLT_MAINTAINER_NAME])
+dnl AC_SUBST([DFLT_MAINTAINER_EMAIL])
+dnl AC_SUBST([DFLT_MAINTAINER_FULL])
+
+
+dnl We have the Automake "Silent Rules" feature enabled by default, which
+dnl allows us to control the verbosity of output messages at build time.
+dnl
+dnl Users can override this at configure time by specifying '--disable-silent-rules'.
+dnl
+dnl Users can control the verbosity at build time by specifying either:
+dnl     make V=1 ...
+dnl or
+dnl     make V=0 ...
+dnl
+dnl Rationale: For historical reasons, the Automake default is to have this
+dnl feature disabled, which results in detailed output being emitted at build
+dnl time (every command invoked, plus its output). That behavior is
+dnl theoretically useful for debugging failures, but for this project actually
+dnl makes the build less easy to follow because of the sheer volume of it.
+dnl
+AM_SILENT_RULES([yes])
+
+
+dnl +------------------------+
+dnl |  Checks for programs.  |
+dnl +------------------------+
+
+dnl modtern Autoconf-based $(MKDIR_P)
+AC_PROG_MKDIR_P
+
+AC_PATH_PROG(BASENAME_PROG, basename)
+if test -z "$BASENAME_PROG"; then
+    AC_MSG_ERROR([basename not found])
+fi
+
+## We need bash >= 4.x (associative arrays were added in bash-4.0)
+##
+AC_PATH_PROG(BASH_SH, bash)
+AS_IF([test -z "$BASH_SH"], [AC_MSG_ERROR([bash not found])],
+      [["${BASH_SH}" -c 'test -n "${BASH_VERSINFO@<:@0@:>@:+set}" && test ${BASH_VERSINFO@<:@0@:>@]} -ge 4 && exit 0'], [:],
+      [AC_MSG_ERROR([found version of bash is not new enough; bash 4.0 or newer is required])
+])
+
+AC_PATH_PROG([CHMOD_PROG], [chmod])
+if test -z "$CHMOD_PROG"; then
+    AC_MSG_ERROR([chmod not found])
+fi
+
+AC_PATH_PROG(DIRNAME_PROG, dirname)
+if test -z "$DIRNAME_PROG"; then
+    AC_MSG_ERROR([dirname not found])
+fi
+
+dnl Note that it is not a bug that we check for plain 'mkdir' here, even
+dnl though we used AC_PROG_MKDIR_P above. We use both for different purposes.
+AC_PATH_PROG([MKDIR_PROG], [mkdir])
+if test -z "$MKDIR_PROG"; then
+    AC_MSG_ERROR([mkdir program not found])
+fi
+
+AC_PATH_PROG([MV_PROG], [mv])
+if test -z "$MV_PROG"; then
+    AC_MSG_ERROR([mv program not found])
+fi
+
+dnl FIXME: POSIX.1-2024 (a.k.a. "Issue 8") requires 'realpath -e' and
+dnl        'realpath -E', stating in realpath(1) that "Portable applications
+dnl        should always specify either -e or -E." Earlier versions of the
+dnl        standard did not include the realpath(1) utility.
+dnl
+dnl        At the time of writing (2025-08), I do not have any systems that
+dnl        have a realpath(1) utility that conforms with the above
+dnl        requirement. But I would like to prefer the standardized behavior
+dnl        in the future on the expectation that it will eventually be the
+dnl        most portable.
+dnl
+dnl        Conversely, both my GNU/Linux and FreeBSD systems have a
+dnl        readlink(1) utility that supports the '-f' option. POSIX.1-2024
+dnl        also newly requires conforming systems to provide a readlink(1)
+dnl        utiity, but they deliberately omitted the '-f' option, stating in
+dnl        readlink(1), "The -f option found in many implementations was not
+dnl        included, as the realpath utility provides equivalent functionality
+dnl        with a choice of behaviors."
+dnl
+dnl        Create a macro (or pair of macros) that locate programs that
+dnl        provide the behavior standardized as 'realpath -e' and 'realpath
+dnl        -E'. Maybe model them after the AC_PROG_MKDIR_P macro, so we would
+dnl        have ads_PROG_REALPATH_e and ads_PROG_REALPATH_E. I do not like the
+dnl        names having mixed case, but those are the names closest to what I
+dnl        would expect as an Autotools user.
+dnl
+# readlink(1) (on GNU/Linux hosts, provided by the GNU coreutils)
+AC_PATH_PROG([READLINK_PROG], [readlink])
+if test -z "$READLINK_PROG"; then
+    AC_MSG_ERROR([readlink not found])
+fi
+
+AC_PATH_PROG([RM], [rm])
+if test -z "$RM"; then
+    AC_MSG_ERROR([rm not found])
+fi
+
+
+dnl +------------------------+
+dnl |  Checks for Libraries  |
+dnl +------------------------+
+dnl
+dnl (none)
+
+
+dnl +----------------------+
+dnl |  Checks for Headers  |
+dnl +----------------------+
+dnl (none)
+
+
+dnl +------------------------------------------------------------------+
+dnl |  Checks for typedefs, structures, and compiler characteristics.  |
+dnl +------------------------------------------------------------------+
+dnl (none)
+
+
+dnl +---------------------------------+
+dnl |  Checks for library functions.  |
+dnl +---------------------------------+
+dnl (none)
+
+
+dnl +---------------------+
+dnl |  Autotools Output.  |
+dnl +---------------------+
+
+## The 'do_subst' Makefile var is the conventional name for manual
+## filtering process that needs to be done at build time.
+##
+## Basically, any file we generate that is not a Makefile should be
+## filtered at build time rather than at configure time; at build
+## time, autotools variables will be fully expanded (well, expanded
+## recursively, which amounts to the same thing) and allows any of the
+## make vars to be overridden on the 'make' command line. This also
+## avoids other kludgey hacks, such as eval'ing shell variables to
+## expand them at configure time).
+##
+## Note that we replace all of the autoconf installation directory
+## vars (see "Installation Directory Variables" in the autoconf
+## manual) and most of the autoconf preset output variables (see
+## "Preset Output Variables" in the autoconf manual). The exceptions
+## to that latter are flag vars to the C/C++/Fortran compilers,
+## linkers, etc. (CFLAGS and friends), and the 'configure_input' var,
+## which we have to provide our own variation of. We also omit
+## 'builddir' (which is always '.'); in this last case, what you
+## probably want instead is 'abs_builddir', which we provide.
+##
+## Our 'do_subst' is defined to mimic the Automake behavior of omitting lines
+## from the output that start with '##' (such as the current comment
+## block). As with the built-in Automake behavior, leading space is allowed in
+## front of the '##' by our 'do_subst', too.
+##
+## Note that dotbashdir is added by this project to install Bash-specific
+## non-executable data files into:
+##
+##     $(pkgdatadir)/bash
+##
+## We're calling these "dotbash" files because they have a .bash file
+## extension. See also:
+##     Makefile.am.inc
+##     src/main/bash/share/Makefile.am
+##     src/main/bash/bin/Makefile.am
+##
+[
+do_subst_command='do_subst = sed \
+  -e '"'"'/^[[:space:]]*[\#][\#].*/d'"'"'   \
+  \
+  -e '"'"'s,[@]PACKAGE[@],$(PACKAGE),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_NAME[@],$(PACKAGE_NAME),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_TARNAME[@],$(PACKAGE_TARNAME),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_VERSION[@],$(PACKAGE_VERSION),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_STRING[@],$(PACKAGE_STRING),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_BUGREPORT[@],$(PACKAGE_BUGREPORT),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_URL[@],$(PACKAGE_URL),g'"'"' \
+  \
+  -e '"'"'s,[@]VERSION[@],$(VERSION),g'"'"' \
+  -e '"'"'s,[@]PATH_SEPARATOR[@],$(PATH_SEPARATOR),g'"'"' \
+  -e '"'"'s,[@]configure_input[@],Generated from $@.in; do not edit by hand.,g'"'"' \
+  -e "s,[@]BUILD_DATE[@],$$(date '"'"'+%Y-%m-%d %H:%M:%S'"'"'),g" \
+  \
+  -e '"'"'s,[@]host_cpu[@],$(host_cpu),g'"'"' \
+  -e '"'"'s,[@]host_vendor[@],$(host_vendor),g'"'"' \
+  -e '"'"'s,[@]host_os[@],$(host_os),g'"'"' \
+  \
+  -e '"'"'s,[@]bindir[@],$(bindir),g'"'"' \
+  -e '"'"'s,[@]datadir[@],$(datadir),g'"'"' \
+  -e '"'"'s,[@]exec_prefix[@],$(exec_prefix),g'"'"' \
+  -e '"'"'s,[@]includedir[@],$(includedir),g'"'"' \
+  -e '"'"'s,[@]infodir[@],$(infodir),g'"'"' \
+  -e '"'"'s,[@]libdir[@],$(libdir),g'"'"' \
+  -e '"'"'s,[@]libexecdir[@],$(libexecdir),g'"'"' \
+  -e '"'"'s,[@]localstatedir[@],$(localstatedir),g'"'"' \
+  -e '"'"'s,[@]mandir[@],$(mandir),g'"'"' \
+  -e '"'"'s,[@]oldincludedir[@],$(oldincludedir),g'"'"' \
+  -e '"'"'s,[@]prefix[@],$(prefix),g'"'"' \
+  -e '"'"'s,[@]sbindir[@],$(sbindir),g'"'"' \
+  -e '"'"'s,[@]sharedstatedir[@],$(sharedstatedir),g'"'"' \
+  -e '"'"'s,[@]sysconfdir[@],$(sysconfdir),g'"'"' \
+  \
+  -e '"'"'s,[@]abs_builddir[@],$(abs_builddir),g'"'"' \
+  -e '"'"'s,[@]abs_srcdir[@],$(abs_srcdir),g'"'"' \
+  -e '"'"'s,[@]abs_top_builddir[@],$(abs_top_builddir),g'"'"' \
+  -e '"'"'s,[@]srcdir[@],$(srcdir),g'"'"' \
+  -e '"'"'s,[@]top_builddir[@],$(top_builddir),g'"'"' \
+  -e '"'"'s,[@]top_srcdir[@],$(top_srcdir),g'"'"' \
+  \
+  -e '"'"'s,[@]dotbashdir[@],$(dotbashdir),g'"'"' \
+  \
+  -e '"'"'s,[@]BASENAME_PROG[@],$(BASENAME_PROG),g'"'"' \
+  -e '"'"'s,[@]BASH_SH[@],$(BASH_SH),g'"'"' \
+  -e '"'"'s,[@]CHMOD_PROG[@],$(CHMOD_PROG),g'"'"' \
+  -e '"'"'s,[@]DIRNAME_PROG[@],$(DIRNAME_PROG),g'"'"' \
+  \
+  -e '"'"'s,[@]MKDIR_P[@],$(MKDIR_P),g'"'"' \
+  -e '"'"'s,[@]MKDIR_PROG[@],$(MKDIR_PROG),g'"'"' \
+  -e '"'"'s,[@]MV_PROG[@],$(MV_PROG),g'"'"' \
+  \
+  -e '"'"'s,[@]READLINK_PROG[@],$(READLINK_PROG),g'"'"' \
+  -e '"'"'s,[@]RM[@],$(RM),g'"'"' \
+'
+]
+AC_SUBST([do_subst_command])
+
+# It's common for makefile scripts to need to "sed sanitize" the value of a
+# variable in order to use it on the left side of a sed 's' (substitution)
+# command. To obtain a "sed sanitized" copy of any variable, echo its value to:
+#     $(sed_slsanitize)
+#
+# Example:
+#     vers_sedslsanitized=$$(printf "%s\n" "-$(VERSION)" | $(sed_slsanitize)) ;\
+#     nonvers=$$(echo progwithvers | sed -e "s/$${vers_sedslsanitized}$$//")
+[
+sed_slsanitize_command='sed_slsanitize = sed \
+  -e '"'"'s!\([]^\*\$\/&[]\)!\\\1!g'"'"' \
+  -e '"'"'s![-]![-]!g'"'"' \
+'
+]
+AC_SUBST([sed_slsanitize_command])
+
+# Similar to 'sed_slsanitize' above, but for the replacement text on the right
+# side of a sed 's' (substitution) command. On the right side of a sed 's'
+# substitution we only need to escape backslashes and amperdoodle chars.
+[
+sed_srsanitize_command='sed_srsanitize = sed \
+  -e '"'"'s!\([\/&]\)!\\\1!g'"'"' \
+'
+]
+AC_SUBST([sed_srsanitize_command])
+
+
+dnl AC_CONFIG_FILES requires a list of file paths, but we do not want
+dnl to have to maintain the list by hand.
+dnl
+dnl To obtain a list of of paths to all Makefiles we want to have
+dnl generated, based on the existence of Makefile.am files, run the
+dnl following shell snippet (for use as the argument to
+dnl AC_CONFIG_FILES).
+dnl
+dnl Note that we take care to m4-quote the output strings. Filenames
+dnl with square brackets in them will break this, so don't do that.
+dnl
+dnl   find . -type f -name 'Makefile.am' -printf "%P\n"| sed -e 's/\.am$//g;s/^/[/g;s/$/]/g' | sort
+dnl
+dnl Cookbook for emacs users:
+dnl   1. Delete all [**/Makefile] entries from args to AC_CONFIG_FILES
+dnl
+dnl   2. Copy the above 'find' command line (M-w)
+dnl
+dnl   3. Place point (cursor) on a line by itself after
+dnl      AC_CONFIG_FILES's opening paren and set mark (C-SPACE)
+dnl
+dnl   4. Run the 'find' command, inserting the output at point:
+dnl          C-u M-! C-y RET
+dnl
+dnl   5. Use `indent-region' (C-M-\) to indent the quoted
+dnl      strings. Region is already set up because we set the mark above.
+dnl
+dnl Declare our output Makefiles (and others)
+AC_CONFIG_FILES(
+    [Makefile]
+    [src/Makefile]
+    [src/main/Makefile]
+    [src/main/bash/Makefile]
+    [src/main/bash/bin/Makefile]
+    [src/main/bash/share/Makefile]
+)
+
+dnl Actually output the declared files
+AC_OUTPUT
+
+
+# I know that shell functions are not considered portable to old ancient
+# *nices, but are users of such systems likely to be users of cdm? For now
+# we'll assume not, but please let me know if this assumption is
+# incorrect!. In most cases, it may be that we may need to beef something up
+# to /find/ it, but there should definately be a shell installed that
+# understands functions...
+#
+# Prints on stdout the fully expanded path represented by the value in
+# the SHELL_VAR_NAME param. Does /not/ assign the expanded value to
+# the named shell var.
+#
+# __poor_mans_expand_file_name( SHELL_VAR_NAME )
+#
+# @param SHELL_VAR_NAME should be set to the /name/ of an existing
+#                       shell variable whose value contains a
+#                       directory path that may or may not need
+#                       expansion of the configure shell variables
+#                       ($prefix, and the like).
+#
+__poor_mans_expand_file_name () {
+    _tmp_name=$1
+    _tmp_last="`eval echo '${'"${_tmp_name}"'}'`"
+    if test -z "${_tmp_last}"; then
+        printf "__poor_mans_expand_file_name() (WARNING): var \"%s\" is empty\n" \
+          "${_tmp_name}" 1>&2
+        return 0;  # nothing to do
+    fi
+    _tmp_last_expanded="`eval echo ${_tmp_last}`"
+    while test "${_tmp_last_expanded}" != "${_tmp_last}"; do
+
+        # Set 'last' hold var to most recently expanded version...
+        _tmp_last="${_tmp_last_expanded}"
+
+        # ...and try to expand further.
+        _tmp_last_expanded="`eval echo ${_tmp_last_expanded}`"
+    done
+    printf "%s\n" "${_tmp_last_expanded}"
+    unset _tmp_last_expanded
+    unset _tmp_last
+    unset _tmp_name
+    return 0;
+}
+
+dnl show user a summary of the configured options
+printf "\n"
+printf "${PACKAGE} has been configured with the following options:\n"
+printf "                        Prefix: %s\n" "`__poor_mans_expand_file_name prefix`"
+printf "                 User binaries: %s\n" "`__poor_mans_expand_file_name bindir`"
+dnl printf "               System binaries: %s\n" "`__poor_mans_expand_file_name sbindir`"
+dnl printf "           Configuration files: %s\n" "`__poor_mans_expand_file_name sysconfdir`"
+printf "                  Manual pages: %s\n" "`__poor_mans_expand_file_name mandir`"
+printf "\n"
+printf "                          bash: %s\n" "`__poor_mans_expand_file_name BASH_SH`"
+printf "\n"
+
+
+## DEBUG: Show all variables set in the shell at the end of 'configure' run
+## set | grep -v '^[ {}]' | sort
