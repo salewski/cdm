@@ -29,7 +29,65 @@ will be noted here, as well.
 
 ** improvements
 
-   (None)
+*** issue #1: "build: autoconfiscate 'cdm' project"
+
+    https://github.com/salewski/cdm/issues/1
+
+    The 'cdm' project now provides a proper GNU Autotools-style 'configure'
+    script, to make it easier for sysadmins and/or end-users to install the
+    project. This allows users to type the expect sequence:
+
+    :    $ configure --prefix=/path/to/location
+    :
+    :    $ make
+    :
+    :    $ make install
+
+    The "autoconfiscation" also introduced a new command line utility:
+    'cdm-generate'. This program emits the Bash definition of the 'cdm()'
+    shell function, which is intended to make it easier to add the definition
+    to your shell startup files (e.g., '~/.bash_profile' or '~/.bashrc'),
+    since the program can be invoked from within your text editor (e.g., emacs
+    or vi) to obtain the text (as opposed to having to copy an paste the
+    definition from some file which would otherwise need to be located first).
+
+    Here's an example of the output emitted:
+
+    #+BEGIN_QUOTE
+    :   $ /path/to/bin/cdm-generate
+    :   
+    :   # Avoid defining the cdm() function, if not running interactively
+    :   case $- in
+    :       *i*)
+    :   
+    :   # cdm: like (conditional) 'mkdir -p' followed by 'cd'.
+    :   #
+    :   # Create DIRECTORY... arguments, if they do not yet exist
+    :   # (any needed parent directories will be created, as well);
+    :   # then change (cd) to the DIRECTORY argument named last on the command line.
+    :   #
+    :   # Usage:
+    :   #        cdm { -h | --help }
+    :   #   OR:  cdm { -V | --version }
+    :   #   OR:  cdm DIRECTORY...
+    :   #
+    :   # @parma DIRECTORY... - (required) One or more directories to create (if
+    :   #                       necessary) before cd'ing into the one named last on
+    :   #                       the command line.
+    :   #
+    :   function cdm () {
+    :       local impl_fpath="/path/to/share/cdm/bash/cdm.bash"  # location filtered-in at build time
+    :       if test -e "${impl_fpath}"; then :; else
+    :           printf "cdm: (error): no such file: %s; bailing out\n" "${impl_fpath}" 1>&2
+    :           return 1
+    :       fi
+    :   
+    :       source "${impl_fpath}" "$@"
+    :       return $?
+    :   }
+    :            ;;
+    :   esac
+    #+END_QUOTE
 
 
 * cdm 0.1.0  (2025-02-05)
