@@ -1,0 +1,906 @@
+#! @BASH_SH@ -
+# @configure_input@
+
+# SPDX-FileCopyrightText: <text>
+#     Copyright (c) 2025 Alan D. Salewski <ads@salewski.email>
+# </text>
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+#     This file is part of cdm.
+#
+#     cdm is free software; you can redistribute it and/or modify it
+#     under the terms of the GNU General Public License
+#     as published by the Free Software Foundation; either version 2
+#     of the License, or (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful,
+#     but WITHOUT ANY WARRANTY; without even the implied warranty of
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#     GNU General Public License for more details.
+#
+#     You should have received a copy of the GNU General Public License
+#     along with this program; if not, see <https://www.gnu.org/licenses/>.
+
+## This file, cdm-generate.in, is filtered at build time to produce the
+## cdm-generate program.
+##
+# cdm-generate: Prints on stdout the definition of the cdm() Bash shell
+# function, with or without a comment block.
+#
+# This program is provided as a convenience for invocation within a
+# programming editor (e.g., emacs or vi) while editing Bash startup scripts
+# (e.g., .bash_profile or .bashrc). It allows one to easily add the definition
+# of the cdm() shell function.
+#
+# Conceivably, this program could be enhanced in the future to emit the 'cdm()'
+# function definition for different shells (as opposed to assuming the user
+# wants a definition for use within Bash, which is the current behavior). (Such
+# behavior would be similar in spirit to existing tools, such as ssh-agent(1),
+# which provides the '-s' and '-c' options to allow the user to request emitted
+# syntax appropriate for the Bourne shell or csh, respectively.)
+#
+#
+# Motivation:
+# -----------
+# The 'cdm' command is implemented as a shell function because it is intended
+# to change the current working directory of an interactive shell process. On
+# Unix-like systems, that is not possible from an inferior subprocess, so it
+# cannot be implemented as a regular program on $PATH.
+#
+# Unless the system administrator has added the function to the system-wide
+# Bash startup scripts (e.g., /etc/bash.bashrc or similar), each user on the
+# system who wishes to use 'cdm' must modify his or her own shell startup
+# scripts to include its definition. Since that is inherently more clumsy than
+# simply installing a program where it will be found on the default $PATH, this
+# program is provided to allow more uniform configuration by users.
+#
+# Users can invoke this 'cdm-generate' program from within their editor (e.g.,
+# emacs or vi) to insert its output at a specific location in the shell startup
+# script they are editing (~/.bash_profile, ~/.bashrc, or similar).
+#
+# See also:
+#     cdm-generate(1)
+#     cdm(1)
+#
+#     @dotbashdir@/cdm_function.bash
+# 
+declare -r prog='generate-cdm'
+
+declare -r copyright_dates='2025'
+
+# declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
+declare -r maintainer='@PACKAGE_BUGREPORT@'  # value filtered-in at build time
+
+declare -r version='@VERSION@'  # value filtered-in at build time
+
+declare -r gl_const_build_date='@BUILD_DATE@'  # value filtered-in at build time
+declare -r gl_const_release="${version}  (built: ${gl_const_build_date})"
+# declare -r gl_const_release="${version}"
+
+
+declare -r fname_cdm_function_dot_bash='cdm_function.bash'
+
+declare -r dflt_dot_bash_dir='@dotbashdir@'  # value filtered-in at build time
+
+declare -r dflt_fpath_cdm_function_dot_bash="${dflt_dot_bash_dir}"'/'"${fname_cdm_function_dot_bash}"
+
+
+# Note that we use an "application" ${tracing} flag separate from Bash's
+# built-in 'xtrace' (set -x) shell option. This allows us to have a general
+# notion of user-requested verbosity separate from any selectively placed
+# 'set -x/set +x' sections we may plug into the code while working on the
+# program itself; similarly for places where we might want to avoid trace
+# output while debugging by selectively placing 'set +x/set -x' sections; both
+# of those behaviors would be much more cumbersome to achieve if we just
+# checked for 'x' in $- at runtime.
+#
+be_verbose=false   # enable with one '-v' (--verbose) opt
+debugging=false    # enable with two '-v' (--verbose) opts
+tracing=false      # enable with three or more '-v' (--verbose) opts
+
+re_blank='^[[:space:]]*$'
+#re_empty='^$'
+
+
+# By default we'll use the external programs found at configure-time (values
+# are filtered-in here at build time). But we allow the user to override any
+# particular tool by setting an environment variable named after the tool
+# (with hyphen chars changed to underscores).
+#
+cmd_basename="${BASENAME:-@BASENAME_PROG@}"
+#
+cmd_dirname="${DIRNAME:-@DIRNAME_PROG@}"
+#
+cmd_readlink="${READLINK:-@READLINK_PROG@}"
+
+
+should_print_interactive_conditional=true
+should_print_comment_block=true
+
+
+# For needed internal progs (if any), we will just expect them to be installed
+# "next to" the current program.
+#
+# Note that the mechanism used here needs to work both "in-tree" and when
+# installed. When working in-tree, the other in-tree versions of our internal
+# tools must be found first (even if the tools are installed on the system).
+#
+# The same thing goes for data files -- when working "in-tree", we must use the
+# in-tree versions of those files.
+#
+# Likewise, the installed versions of our programs must use the installed
+# versions of the files (and not the "in-tree" versions).
+#
+# Note, too, that our definition of "in-tree" must take into account the
+# possibility of the build tree being separate from the pristine source tree
+# (as is the case with VPATH builds). For our purposes here, locations within
+# the pristine source tree and locations in the build tree are both considered
+# to be "in-tree".
+#
+# XXX: We use a heuristic to decide whether or not we are running "in-tree".
+#      The heuristic is based on the idiosyncratic layout of our project's
+#      source tree, which uses a convention that can be distinguished from a
+#      conventional installation location on *nix-based systems. This heuristic
+#      is not fool-proof, however. If somebody is intentionally making life
+#      more difficult for themselves by using a goofball ${prefix} that
+#      resembles our source tree layout, then we DO NOT consider it a bug that
+#      such usage may run into trouble with this mechanism. OTOH, if our
+#      heuristic clashes with a legit use case that you have, then please open
+#      a bug report to let us know!
+#
+t_running_in_tree=false
+#
+t_script_dir=${0%/*}
+t_rp=$("${cmd_readlink}" -f "${t_script_dir}") || exit 1
+t_p1=$("${cmd_basename}" "${t_rp}")            || exit 1
+t_p2=$("${cmd_basename}" "$("${cmd_dirname}" "${t_rp}")") || exit 1
+t_p3=$("${cmd_basename}" "$("${cmd_dirname}" "$("${cmd_dirname}" "${t_rp}")")") || exit 1
+t_p4=$("${cmd_basename}" "$("${cmd_dirname}" "$("${cmd_dirname}" "$("${cmd_dirname}" "${t_rp}")")")") || exit 1
+
+##cmd_whatever="${t_script_dir}"'/some-intree-program'
+##
+# Any non-Bash-based tools (e.g., those implemented in Perl or Rust or
+# whatever) may or may not be in the same directory, depending on whether or
+# not we are running in-tree.
+#
+# XXX: This is ugly; is there a better way?
+if test 'bin'  = "${t_p1}" \
+&& test 'bash' = "${t_p2}" \
+&& test 'main' = "${t_p3}" \
+&& test 'src'  = "${t_p4}"; then
+    : $prog \(trace: $LINENO\): looks like we are running in-tree
+    t_running_in_tree=true
+else
+    : $prog \(trace: $LINENO\): looks like we running from installed location \(that is, not in-tree\)
+fi
+
+if $t_running_in_tree; then
+##    cmd_some_perlbased_program="${t_script_dir}/../../perl/bin/some-perlbased-program"
+##    cmd_some_rustbased_program="${t_script_dir}/../../rust/bin/tool-name/target/release/some-rustbased-program"
+##
+    fpath_cdm_function_dot_bash="${t_script_dir}"'/../share/'"${fname_cdm_function_dot_bash}"
+else
+##    cmd_some_perlbased_program="${t_script_dir}"'/some-perlbased-program'
+##    cmd_some_rustbased_program="${t_script_dir}"'/some-rustbased-program'
+##
+    fpath_cdm_function_dot_bash=${dflt_fpath_cdm_function_dot_bash}
+fi
+
+declare -a needed_internal_progs=(
+##    "${cmd_some_perlbased_program}"
+##    "${cmd_some_rustbased_program}"
+##    "${cmd_whatever}"
+)
+for int_tool in "${needed_internal_progs[@]}"; do
+    if test -x "${int_tool}"; then :; else
+        printf '%s (error): was unable to locate internal tool: "%s"; bailing out\n' "${prog}" "${int_tool}" 1>&2
+        exit 1
+    fi
+    : $prog \(trace: $LINENO\): found internal tool: ${int_tool}
+done
+
+declare -a needed_internal_data_files=(
+    "${fpath_cdm_function_dot_bash}"
+)
+for int_data_file in "${needed_internal_data_files[@]}"; do
+    if test -e "${int_data_file}"; then :; else
+        printf '%s (error): was unable to locate internal data file: "%s"; bailing out\n' "${prog}" "${int_data_file}" 1>&2
+        exit 1
+    fi
+    if test -r "${int_data_file}"; then :; else
+        printf '%s (error): internal data file is not readable: "%s"; bailing out\n' "${prog}" "${int_data_file}" 1>&2
+        exit 1
+    fi
+    : $prog \(trace: $LINENO\): found internal data file: ${int_data_file}
+done
+
+
+declare -a f_cleanup_hook_names=()
+
+function f_add_cleanup_hook_name () {
+    f_cleanup_hook_names+=( $1 );
+}
+
+
+function f_cleanup () {
+
+    if test ${#f_cleanup_hook_names[@]} -eq 0; then
+        # No cleanup hooks, so nothing to do
+        return
+    fi
+
+    local cleanup_hook
+    local idx
+
+    let idx=${#f_cleanup_hook_names[@]}-1
+
+    # Note that we're running the cleanup hooks in opposite order from which
+    # they were installed.
+    #
+    while test $idx -ge 0; do
+
+        cleanup_hook=${f_cleanup_hook_names[$idx]}
+
+        if $debugging; then
+            printf '%s (debug): running cleanup hook: [%s]\n' "${prog}" "${cleanup_hook}" 1>&2
+        fi
+
+        test -n "$cleanup_hook" && eval "$cleanup_hook"
+
+        let idx=$idx-1
+    done
+}
+
+function f_cleanup_and_die () {
+    f_cleanup
+    exit 1
+}
+
+trap 'printf '"'"'%s (warn): HUP signal caught; bailing out\n'"' ""${prog}"' 1>&2; f_cleanup_and_die' HUP
+trap 'printf '"'"'%s (warn): INT signal caught; bailing out\n'"' ""${prog}"' 1>&2; f_cleanup_and_die' INT
+trap 'printf '"'"'%s (warn): QUIT signal caught; bailing out\n'"' ""${prog}"' 1>&2; f_cleanup_and_die' QUIT
+trap 'printf '"'"'%s (warn): TERM signal caught; bailing out\n'"' ""${prog}"' 1>&2; f_cleanup_and_die' TERM
+
+trap 'f_cleanup' EXIT
+
+
+f_print_help () {
+
+    cat <<EOF
+usage: ${prog} { -h | --help }
+  or:  ${prog} { -V | --version }
+  or:  ${prog} [OPTION...] [--]
+
+Prints on stdout the definition (in Bash shell syntax) of the 'cdm' function.
+
+  -h, --help     Print this help message on stdout
+  -V, --version  Print the version of the program on stdout
+  -v, --verbose  Print program progress messages on stderr. Specify multiple
+                   times to increase verbosity: info, debug, and tracing (set -x)
+      --         Signals the end of options and disables further options processing. Any
+                   remaining arguments will cause program to exit with an error
+
+Report bugs to ${maintainer}.
+EOF
+}
+
+f_print_version () {
+    cat <<EOF
+${prog} ${gl_const_release}
+
+Copyright (C) ${copyright_dates} Alan D. Salewski <ads@salewski.email>
+
+License GPLv2+: GNU GPL version 2 or later <https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Written by Alan D. Salewski.
+EOF
+}
+
+
+pos_last_plus_one=$(( $# + 1 ))
+
+# Each value is one or zero, which indicates whether or not the option is
+# expected to have an argument.
+#
+declare -A longopt_spec=(
+    ['help']=0      # -h
+    ['version']=0   # -V
+
+    ['verbose']=0   # -v
+)
+
+# internal sanity check
+for one_key in "${!longopt_spec[@]}"; do
+    one_val=${longopt_spec[${one_key}]}
+    if [[ $one_val =~ ^[01]$ ]]; then :; else
+        printf '%s (BUG) [line $LINENO]: value (%s) for longopt key '"'"'%s'"'"' must be either 0 or 1; bailing out\n' \
+               "${prog}" "${one_val}" "${one_key}" 1>&2
+        exit 1
+    fi
+done
+
+if test $# -gt 0; then
+
+    # Using getopts in "silent mode". Note that adding '-' to the optstring
+    # allows us to process GNU-style long-form options; that option is
+    # specified to take an argument to cause getopts to place whatever follows
+    # the second '-' character into OPTARG.
+    #
+    # Note that getopts will automatically stop processsing options upon
+    # encountering '--', but we still need to deal with the pathological form
+    # --=BLAH (no option name, just a value using the equals-sign syntax).
+    #
+    while getopts ':-:hVv' opt
+    do
+        : $prog \(trace: $LINENO\): opt is: $opt
+
+        if test "${opt}" = '-'; then
+
+            # Intercepting processing of long-form option. This conditional
+            # block will set up the 'opt', 'OPTARG', and 'OPTIND' variables for
+            # the code that follows, just as if getopts had the capability to
+            # process long-form options.
+
+            # OPTARG here is one of:
+            #
+            #     =BLAH    (which means user specified '--=BLAH')
+            # or:
+            #     foo
+            # or:
+            #     foo=FOOVAL
+
+            if [[ ${OPTARG} =~ .*=.* ]]; then
+
+                : $prog \(trace: $LINENO\): OPTARG is name=value style
+
+                # Keep everything up to the first '=' sign. Note that if the
+                # option was specified as: --foo=FOOVAL, then $opt here will be
+                # 'foo' (no hyphen chars).
+                opt=${OPTARG/=*/}
+                : $prog \(trace: $LINENO\): opt is: $opt
+
+                : $prog \(trace: $LINENO\): a long option name must be at least two characters in length
+                if test ${#opt} -le 1; then
+                    printf '%s (error): invalid long option '"'"'--%s'"'"'; bailing out\n' "${prog}" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                t_exists=false
+                for one_key in "${!longopt_spec[@]}"; do
+                    if test "${opt}" = "${one_key}"; then
+                        t_exists=true
+                        break
+                    fi
+                done
+
+                : $prog \(trace: $LINENO\): a long option name must be one that the program is expecting
+                if $t_exists; then :; else
+                    # Note that we need to restore the leading '-' chars
+                    printf '%s (error): unrecognized long option '"'"'--%s'"'"'; bailing out\n' "${prog}" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                # Since we know the option was specified in --foo=BAR form, the
+                # option was specified erroneously unless the option's long-form
+                # spec indicates that it can accept an argument.
+                #
+                if test ${longopt_spec[${opt}]} -ne 1; then
+                    printf '%s (error): option '"'"'--%s'"'"' does not take an argument; bailing out\n' "${prog}" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                OPTARG=${OPTARG#*=}  # keep everything after the first '=' sign
+                : $prog \(trace: $LINENO\): OPTARG is: $OPTARG
+
+                # All of our command line options that accept arguments require
+                # the values for those arguments to be non-empty strings.
+                if [[ "${OPTARG}" =~ $re_blank ]]; then
+                    printf '%s (error): argument for option '"'"'--%s'"'"' may not be blank; bailing out\n' "${prog}" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+            else
+                : $prog \(trace: $LINENO\): OPTARG is name-only style
+
+                opt="$OPTARG"
+                : $prog \(trace: $LINENO\): opt is: $opt
+
+                if test -z "${opt}"; then
+
+                    # This should be a "can't happen" scenario; since bash's 'getopts'
+                    # implementation should directly handle the magic '--' token, we
+                    # should never fall through here.
+
+                    printf '%s (BUG) [line %d]: received empty OPTARG, which means getopts did not handle the stand-alone '"'"'--'"'"' token; bailing out\n' "${prog}" "${LINENO}" 1>&2
+                    exit 1
+                fi
+
+                : $prog \(trace: $LINENO\): a non-empty long option name must be at least two characters in length
+                if test ${#opt} -lt 2; then
+                    printf '%s (error): invalid long option '"'"'--%s'"'"'; bailing out\n' "${prog}" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                t_exists=false
+                for one_key in "${!longopt_spec[@]}"; do
+                    if test "${opt}" = "${one_key}"; then
+                        t_exists=true
+                        break
+                    fi
+                done
+
+                : $prog \(trace: $LINENO\): a long option name must be one that the program is expecting
+                if $t_exists; then :; else
+                    printf '%s (error): unrecognized long option '"'"'--%s'"'"'; bailing out\n' "${prog}" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                # We know the option was specified in one of the following forms:
+                #
+                #     --foo
+                # or:
+                #     --foo FOOVAL
+                #
+                # The option's long-form spec will tell us whether or not an argument is
+                # expected for the option.
+                #
+                if test ${longopt_spec[${opt}]} -eq 1; then
+
+                    # If bumping OPTIND would put us more than one beyond the "last pos
+                    # plus one", then there is no argument provided at position OPTIND for
+                    # us to consume.
+                    #
+                    if (( $(( $OPTIND + 1 )) > pos_last_plus_one )); then
+
+                        printf '%s (error): missing argument for option '"'"'--%s'"'"'\n' "${prog}" "${OPTARG}" 1>&2
+                        f_print_help 1>&2
+                        exit 1
+                    fi
+
+                    OPTARG=${@:${OPTIND}:1}
+                    (( ++OPTIND ))
+                    : $prog \(trace: $LINENO\): manually incremented OPTIND to: $OPTIND
+
+                    # All of our command line options that accept arguments
+                    # require the values for those arguments to be non-empty
+                    # strings.
+                    if [[ "${OPTARG}" =~ $re_blank ]]; then
+                        printf '%s (error): argument for option '"'"'--%s'"'"' may not be blank; bailing out\n' "${prog}" "${opt}" 1>&2
+                        f_print_help 1>&2
+                        exit 1
+                    fi
+                fi
+            fi
+        fi
+
+        : $prog \(trace: $LINENO\): opt is: $opt
+        : $prog \(trace: $LINENO\): OPTARG is: $OPTARG
+        : $prog \(trace: $LINENO\): OPTIND is: $OPTIND
+
+        # Normal getopts style processing happens beneath here, with the slight
+        # twist that 'opt' may contain a long-form option name.
+
+        case $opt in
+
+            'help' | 'h' )
+                # print help message
+                f_print_help
+                exit 0
+                ;;
+
+
+            'version' | 'V' )
+                # print program version info
+                f_print_version
+                exit 0
+                ;;
+
+
+            'verbose' | 'v' )
+                # Accumulating 'verbose' opt. A single -v opt simply turns
+                # ${be_verbose} on (enables (additional) info-level messages). Two -v
+                # opts turns on ${debugging}, which additionally enables debug-level
+                # messages. Three or more '-v' opts turns ${tracing} on. Note that
+                # if you intend to turn tracing on, you'll probably want your -v
+                # opts to be the first opts on the command line (so they take
+                # effect earlier).
+                if $be_verbose; then
+
+                    if $debugging; then
+
+                        # We've seen at least two -v opt before, so now we're
+                        # turning tracing on.
+
+                        if $tracing; then
+                            : $prog \(trace: $LINENO\): tracing already enabled
+                        else
+                            # See comments at the decl spot for ${tracing}
+                            # pertaining to why we maintain an "application"
+                            # ${tracing} flag separate from bash's built-in
+                            # 'xtrace' (set -x) shell option.
+
+                            # Enable tracking before setting our app-level
+                            # ${tracing} flag so that setting it is the first
+                            # thing that appears in the trace.
+                            set -x
+                            tracing=true
+                        fi
+                    else
+                        # Second -v opt we're seeing
+                        debugging=true
+                        # Just to give a warm and fuzzy...
+                        printf '%s (debug): debug-level output enabled\n' "${prog}" 1>&2
+                    fi
+                else
+                    # First -v opt we're seeing
+                    be_verbose=true
+                fi
+                ;;
+
+
+
+            ':')  # getopts put : in opt
+                  # Note that we need to restore the leading '-' that getopts
+                  # has sliced off.
+                  printf '%s (error): missing argument for option '"'"'-%s'"'"'\n' "${prog}" "${OPTARG}" 1>&2
+                  f_print_help 1>&2
+                  exit 1
+                  ;;
+
+            '?')  # getopts put ? in opt
+                  # Unrecognized option; note that we need to restore the leading '-' that
+                  # getopts has sliced off.
+                  printf '%s (error): unrecognized option '"'"'-%s'"'"'; bailing out\n' "${prog}" "${OPTARG}" 1>&2
+                  f_print_help 1>&2
+                  exit 1
+                  ;;
+
+            * )   printf '%s (BUG) [line %d]: unhandled option case; opt: '"'"'%s'"'"',  OPTARG: '"'"'%s'"'"'\n' \
+                         "${prog}" "${LINENO}" "${opt}" "${OPTARG}" 1>&2
+                  exit 1
+                  ;;
+        esac
+    done
+fi
+
+# shift off all arguments already handled
+let ii=1;  # shell OPTIND index starts at 1
+while (( ii < ${OPTIND} )); do
+    shift
+    (( ++ii ))
+    : $prog \(trace: $LINENO\): ii is now: $ii
+done
+
+# Any remaining arguments probably indicate user error, so complain loudly
+# about them (do not ignore them silently).
+#
+if test $# -gt 0; then
+    printf '%s (error): unrecognized arguments (%s); bailing out\n\n' "${prog}" "$*" 1>&2
+    exit 1
+fi
+
+
+# main
+
+# Note that this sanity-checking of our 'cdm_function.bash' file is more
+# comprehensive than the basic sanity-checking performed earlier for all data
+# files.
+#
+: $prog \(trace: $LINENO\): ensure our cdm_function.bash file exists, etc.
+if test -e "${fpath_cdm_function_dot_bash}"; then :; else
+    printf '%s (error): no such file or directory: '"'"'%s'"'"'; bailing out\n' \
+           "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+    exit 1
+fi
+if test -d "${fpath_cdm_function_dot_bash}"; then
+    printf '%s (error): expected regular file but found a directory instead: '"'"'%s'"'"'; bailing out\n' \
+           "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+    exit 1
+fi
+if test -r "${fpath_cdm_function_dot_bash}"; then :; else
+    printf '%s (error): file is not readable: '"'"'%s'"'"'; bailing out\n' \
+           "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+    exit 1
+fi
+if test -s "${fpath_cdm_function_dot_bash}"; then :; else
+    printf '%s (error): file is empty: '"'"'%s'"'"'; bailing out\n' \
+           "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+    exit 1
+fi
+
+
+# We could extract the wanted lines from the file using sed, but we just do it
+# from within Bash.
+#
+# This section expects that there are four general sections of interest to us
+# in the 'cdm_function.bash' file, and that they are in the following order:
+#
+#     ...
+#     #inter1_begin
+#         [stuff related to starting check for detecting if running interactively]
+#     #inter1_end
+#     ...
+#     #doc_begin
+#         [cdm() function documentation block]
+#     #doc_end
+#     ...
+#     #func_begin
+#         [cdm() function definition]
+#     #func_end
+#     ...
+#     #inter2_begin
+#         [stuff related to closing check for detecting if running interactively]
+#     #inter2_end
+#
+# We will bomb out with an error message if that expectation is violated.
+#
+saw_inter1_begin=false
+saw_inter1_end=false
+count_of_seen_inter1_lines=0
+
+saw_doc_begin=false
+saw_doc_end=false
+count_of_seen_doc_lines=0
+
+saw_func_begin=false
+saw_func_end=false
+count_of_seen_func_lines=0
+
+saw_inter2_begin=false
+saw_inter2_end=false
+count_of_seen_inter2_lines=0
+
+do_print=false
+
+# CAREFUL: We set IFS to prevent Bash from splitting the lines into fields
+#          based on whitespace. In particular, we want to preserve all of the
+#          leading whitespace of each line read, so that the function defintion
+#          we emit is nicely indented (assuming it is nicely indented in the
+#          'cmd_function.bash' file from which we are reading).
+while IFS=$'\n' read -r one_line; do
+
+    case $one_line in
+
+        '#inter1_begin')
+            if $saw_inter1_begin; then
+                printf '%s (error): bad data file "%s" contains multiple "#inter1_begin" landmarks; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            saw_inter1_begin=true
+            : $prog \(trace: $LINENO\): at beginning of start of interactive conditional
+            : $prog \(trace: $LINENO\): should_print_interactive_conditional is: ${should_print_interactive_conditional}
+            if ${should_print_interactive_conditional}; then
+                do_print=true
+                continue  # we won't print the token line
+            fi
+            ;;
+
+        '#inter1_end')
+            if $saw_inter1_begin; then :; else
+                printf '%s (error): bad data file "%s" contains "#inter1_end" landmark before "#inter1_begin"; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            if $saw_inter1_end; then
+                printf '%s (error): bad data file "%s" contains multiple "#inter1_end" landmarks; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            saw_inter1_end=true
+
+            : $prog \(trace: $LINENO\): at end of starting interactive conditional
+            do_print=false
+            continue
+            ;;
+
+
+        '#doc_begin')
+            if $saw_inter1_begin \
+            && $saw_inter1_end; then :; else
+                printf '%s (error): bad data file "%s" contains "#doc_begin" landmark before "#inter1_begin"..."#inter1_end" section; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            if $saw_doc_begin; then
+                printf '%s (error): bad data file "%s" contains multiple "#doc_begin" landmarks; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            saw_doc_begin=true
+
+            : $prog \(trace: $LINENO\): at start of comment block
+            : $prog \(trace: $LINENO\): should_print_comment_block is: ${should_print_comment_block}
+            if ${should_print_comment_block}; then
+                do_print=true
+                continue  # we won't print the token line
+            fi
+            ;;
+
+        '#doc_end')
+            if $saw_doc_begin; then :; else
+                printf '%s (error): bad data file "%s" contains "#doc_end" landmark before "#doc_begin"; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            if $saw_doc_end; then
+                printf '%s (error): bad data file "%s" contains multiple "#doc_end" landmarks; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            saw_doc_end=true
+
+            : $prog \(trace: $LINENO\): at end of comment block
+            do_print=false
+            continue
+            ;;
+
+
+        '#func_begin')
+            if $saw_inter1_begin \
+            && $saw_inter1_end   \
+            && $saw_doc_begin    \
+            && $saw_doc_end; then :; else
+                printf '%s (error): bad data file "%s" contains "#func_begin" landmark before "#inter1_begin"..."#inter1_end" and/or "#doc_begin"..."#doc_end" section(s); bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            if $saw_func_begin; then
+                printf '%s (error): bad data file "%s" contains multiple "#func_begin" landmarks; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            saw_func_begin=true
+
+            : $prog \(trace: $LINENO\): at start of function definition
+            do_print=true
+            continue  # we won't print the token line
+            ;;
+
+        '#func_end')
+            if $saw_func_begin; then :; else
+                printf '%s (error): bad data file "%s" contains "#func_end" landmark before "#func_begin"; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            if $saw_func_end; then
+                printf '%s (error): bad data file "%s" contains multiple "#func_end" landmarks; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            saw_func_end=true
+
+            : $prog \(trace: $LINENO\): at end of function definition
+            do_print=false
+            continue
+            ;;
+
+
+        '#inter2_begin')
+            if $saw_inter1_begin \
+            && $saw_inter1_end   \
+            && $saw_doc_begin    \
+            && $saw_doc_end      \
+            && $saw_func_begin   \
+            && $saw_func_end; then :; else
+                printf '%s (error): bad data file "%s" contains "#inter2_begin" landmark before "#inter1_begin"..."#inter1_end" and/or "#doc_begin"..."#doc_end" and/or "#func_begin"..."#func_end" section(s); bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+
+            if $saw_inter2_begin; then
+                printf '%s (error): bad data file "%s" contains multiple "#inter2_begin" landmarks; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            saw_inter2_begin=true
+            : $prog \(trace: $LINENO\): at beginning of closing of interactive conditional
+            : $prog \(trace: $LINENO\): should_print_interactive_conditional is: ${should_print_interactive_conditional}
+            if ${should_print_interactive_conditional}; then
+                do_print=true
+                continue  # we won't print the token line
+            fi
+            ;;
+
+        '#inter2_end')
+            if $saw_inter2_begin; then :; else
+                printf '%s (error): bad data file "%s" contains "#inter2_end" landmark before "#inter2_begin"; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            if $saw_inter2_end; then
+                printf '%s (error): bad data file "%s" contains multiple "#inter2_end" landmarks; bailing out\n' \
+                       "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+                exit 1
+            fi
+            saw_inter2_end=true
+
+            : $prog \(trace: $LINENO\): at end of closing interactive conditional
+            do_print=false
+            break  # After the '#inter2_end' landmark, there is nothing else in
+                   # the 'cdm_function.bash' file for us to parse out and emit.
+            ;;
+
+
+        *)
+            # Note that we count the lines seen within the sections of
+            # interest, even if we do not emit them (due to user-requested
+            # behavior via command line opts).
+            #
+            if $saw_inter1_begin && ! $saw_inter1_end; then
+                (( ++count_of_seen_inter1_lines ))
+            fi
+            if $saw_doc_begin && ! $saw_doc_end; then
+                (( ++count_of_seen_doc_lines ))
+            fi
+            if $saw_func_begin && ! $saw_func_end; then
+                (( ++count_of_seen_func_lines ))
+            fi
+            if $saw_inter2_begin && ! $saw_inter2_end; then
+                (( ++count_of_seen_inter2_lines ))
+            fi
+
+            if $do_print; then
+                : $prog \(trace: $LINENO\): do_print is set, so emitting one line
+                printf '%s\n' "${one_line}"
+            else
+                : $prog \(trace: $LINENO\): do_print is unset, so avoid emitting line
+            fi
+            ;;
+    esac
+
+done < "${fpath_cdm_function_dot_bash}"
+
+: $prog \(trace: $LINENO\): Finished parsing file: fpath_cdm_function_dot_bash
+
+: $prog \(trace: $LINENO\): count_of_seen_inter1_lines: ${count_of_seen_inter1_lines}
+: $prog \(trace: $LINENO\): count_of_seen_doc_lines:    ${count_of_seen_doc_lines}
+: $prog \(trace: $LINENO\): count_of_seen_func_lines:   ${count_of_seen_func_lines}
+: $prog \(trace: $LINENO\): count_of_seen_inter2_lines: ${count_of_seen_inter2_lines}
+
+# This is crude, but (for now) we will assume that if we saw at least one line
+# in each of the parsed sections of interest, then the correct output was
+# emitted.
+#
+# Otherwise, there is either a problem with the above parsing/emitting code, or
+# the 'cdm_function.bash' file is invalid.
+#
+if test ${count_of_seen_inter1_lines} -ge 1; then :; else
+    printf '%s (error): invalid data file: "%s"; expected at least one "inter1" line; bailing out\n' \
+           "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+    exit 1
+fi
+
+if test ${count_of_seen_doc_lines} -ge 1; then :; else
+    printf '%s (error): invalid data file: "%s"; expected at least one "doc" line; bailing out\n' \
+           "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+    exit 1
+fi
+
+if test ${count_of_seen_func_lines} -ge 1; then :; else
+    printf '%s (error): invalid data file: "%s"; expected at least one "func" line; bailing out\n' \
+           "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+    exit 1
+fi
+
+if test ${count_of_seen_inter2_lines} -ge 1; then :; else
+    printf '%s (error): invalid data file: "%s"; expected at least one "inter2" line; bailing out\n' \
+           "${prog}" "${fpath_cdm_function_dot_bash}" 1>&2
+    exit 1
+fi
+
+exit 0  # success
+
+
+# Local Variables:
+#     mode: sh
+#     eval: (sh-set-shell "bash" t nil)
+# End:

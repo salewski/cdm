@@ -1,0 +1,89 @@
+# @configure_input@
+
+# SPDX-FileCopyrightText: <text>
+#     © 2020, 2025 Alan D. Salewski <ads@salewski.email>
+# </text>
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+#     This file is part of cdm.
+#
+#     cdm is free software; you can redistribute it and/or modify it
+#     under the terms of the GNU General Public License
+#     as published by the Free Software Foundation; either version 2
+#     of the License, or (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful,
+#     but WITHOUT ANY WARRANTY; without even the implied warranty of
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#     GNU General Public License for more details.
+#
+#     You should have received a copy of the GNU General Public License
+#     along with this program; if not, see <https://www.gnu.org/licenses/>.
+
+# There are three primary ways to make the cdm() function available within
+# your Bash shell environment:
+#
+#     1. You can "source" this file directly from your Bash shell startup
+#        scripts (~/.bash_profile, ~/.bashrc, or similar).
+#
+#     2. Use the cdm-generate() command to emit the shell definition on
+#        stdout, optionally without the documentation blurb that preceeds the
+#        function, or without the conditional check that only defines the
+#        function when working within an interactive shell. This approach is
+#        useful when modifying your shell startup scripts from within a
+#        programming editor (e.g., emacs or vi), since you can invoke the
+#        'cdm-generate' program from within your editor to add the function
+#        defintion at the designated location. See cdm-generate(1).
+#
+#     3. Just copy the definition out of this file into your shell startup
+#        script file. Sometimes the caveman approach is the best approach.
+
+#inter1_begin
+
+# Avoid defining the cdm() function, if not running interactively
+case $- in
+    *i*)
+#inter1_end
+
+
+#doc_begin
+
+# cdm: like (conditional) 'mkdir -p' followed by 'cd'.
+#
+# Create DIRECTORY... arguments, if they do not yet exist
+# (any needed parent directories will be created, as well);
+# then change (cd) to the DIRECTORY argument named last on the command line.
+#
+# Usage:
+#        cdm { -h | --help }
+#   OR:  cdm { -V | --version }
+#   OR:  cdm DIRECTORY...
+#
+# @parma DIRECTORY... - (required) One or more directories to create (if
+#                       necessary) before cd'ing into the one named last on
+#                       the command line.
+#
+#doc_end
+#func_begin
+function cdm () {
+    local impl_fpath="@dotbashdir@/cdm.bash"  # location filtered-in at build time
+    if test -e "${impl_fpath}"; then :; else
+        printf "cdm: (error): no such file: %s; bailing out\n" "${impl_fpath}" 1>&2
+        return 1
+    fi
+
+    source "${impl_fpath}" "$@"
+    return $?
+}
+#func_end
+
+#inter2_begin
+         ;;
+esac
+#inter2_end
+
+
+## Local Variables:
+##     mode: sh
+##     eval: (sh-set-shell "bash" t nil)
+## End:
